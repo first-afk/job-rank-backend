@@ -5,6 +5,7 @@ import helmet from "helmet";
 import { env } from "./config/env.js";
 import { pinoHttp } from "pino-http";
 import { errorHandler } from "./middleware/error-handling.js";
+import { authTestRouter } from "./routes/auth-test.routes.js";
 
 export const app = express();
 
@@ -39,6 +40,8 @@ app.get("/health", (_request, response) => {
     environment: env.NODE_ENV,
   });
 });
+
+app.use("/v1/auth-test", authTestRouter);
 
 app.use((request, response) => {
   response.status(404).json({
