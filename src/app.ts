@@ -7,6 +7,7 @@ import { pinoHttp } from "pino-http";
 import { errorHandler } from "./middleware/error-handling.js";
 import { authTestRouter } from "./routes/auth-test.routes.js";
 import { accountRouter } from "./modules/account/account.routes.js";
+import { candidateRouter } from "./modules/candidate/candidate.route.js";
 
 export const app = express();
 
@@ -44,6 +45,7 @@ app.get("/health", (_request, response) => {
 
 app.use("/v1/auth-test", authTestRouter);
 app.use("/v1", accountRouter);
+app.use("/v1/candidate", candidateRouter);
 app.use((request, response) => {
   response.status(404).json({
     error: {
