@@ -6,6 +6,7 @@ import { env } from "./config/env.js";
 import { pinoHttp } from "pino-http";
 import { errorHandler } from "./middleware/error-handling.js";
 import { authTestRouter } from "./routes/auth-test.routes.js";
+import { accountRouter } from "./modules/account/account.routes.js";
 
 export const app = express();
 
@@ -23,7 +24,7 @@ app.use(
 
 app.use(express.json({ limit: "1mb" }));
 
-app.use(pinoHttp());
+app.use(pinoHttp({ autoLogging: false }));
 
 app.get("/", (_request, response) => {
   response.status(200).json({
@@ -42,7 +43,7 @@ app.get("/health", (_request, response) => {
 });
 
 app.use("/v1/auth-test", authTestRouter);
-
+app.use("/v1", accountRouter);
 app.use((request, response) => {
   response.status(404).json({
     error: {

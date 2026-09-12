@@ -18,9 +18,22 @@ export async function requireActiveAccount(
       .from("user_entitlements")
       .select("account_status")
       .eq("user_id", userId)
-      .single();
+      .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
+      console.error("Entitlement query failed:", {
+        code: error.code,
+        message: error.message,
+      });
+
+      throw new AppError(
+        500,
+        "ENTITLEMENT_QUERY_FAILED",
+        "Unable to verify the account entitlement.",
+      );
+    }
+
+    if (!data) {
       throw new AppError(
         403,
         "ENTITLEMENT_NOT_FOUND",

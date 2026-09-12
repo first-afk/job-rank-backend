@@ -4,6 +4,7 @@ import type {
   Request,
   Response,
 } from "express";
+import { ZodError } from "zod";
 
 export class AppError extends Error {
   constructor(
@@ -30,6 +31,18 @@ export const errorHandler: ErrorRequestHandler = (
         code: error.code,
         message: error.message,
         details: error.details ?? null,
+      },
+    });
+
+    return;
+  }
+
+  if (error instanceof ZodError) {
+    response.status(422).json({
+      error: {
+        code: "VALIDATION_ERROR",
+        message: "Some supplied values are invalid.",
+        details: error.flatten().fieldErrors,
       },
     });
 
