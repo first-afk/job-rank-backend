@@ -1,0 +1,107 @@
+{
+  "skills_interests_schema": {
+    "type": "object",
+    "properties": {
+      "skills": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "level": {
+                "type": "string",
+                "enum": ["Beginner", "Intermediate", "Proficient", "Expert"]
+              },
+              "years": {
+                "type": "number"
+              },
+              "projects": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["level", "years"]
+          }
+        }
+      },
+      "areas_of_interest": { "type": "array", "items": { "type": "string" } },
+      "professional_background": {
+        "type": "object",
+        "properties": {
+          "education": { "type": "string" },
+          "seniority": {
+            "type": "string",
+            "enum": [
+              "intern",
+              "entry",
+              "junior",
+              "mid",
+              "senior",
+              "lead",
+              "staff",
+              "principal",
+              "manager",
+              "senior manager",
+              "director",
+              "senior director",
+              "vp",
+              "svp",
+              "evp",
+              "c-level"
+            ]
+          }
+        }
+      },
+      "compensation": {
+        "type": "object",
+        "properties": {
+          "has_salary": { "type": "boolean" },
+          "salary_range": { "type": "string" },
+          "currency": { "type": "string" },
+          "pay_period": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      }
+    }
+  },
+  "behavioral_points_schema": {
+    "type": "object",
+    "properties": {
+      "work_preferences": {
+        "type": "object",
+        "properties": {
+          "environment": { "type": "array", "items": { "type": "string" } },
+          "project_types": { "type": "array", "items": { "type": "string" } },
+          "work_style": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "career_aspirations": {
+        "type": "object",
+        "properties": {
+          "short_term": { "type": "array", "items": { "type": "string" } },
+          "long_term": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "adaptability": { "type": "array", "items": { "type": "string" } },
+      "personal_traits": {
+        "type": "object",
+        "properties": {
+          "learning_approach": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "problem_solving": { "type": "array", "items": { "type": "string" } },
+          "career_planning": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "motivations": { "type": "array", "items": { "type": "string" } },
+      "reasons_company_is_good_place_to_work": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  }
+}

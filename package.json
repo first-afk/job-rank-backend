@@ -21,6 +21,7 @@
   "dependencies": {
     "@supabase/server": "^1.5.2",
     "@supabase/supabase-js": "^2.114.0",
+    "ajv": "^8.20.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
