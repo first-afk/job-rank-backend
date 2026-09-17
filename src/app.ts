@@ -1,4 +1,4 @@
-import express from "express";
+import express, { ErrorRequestHandler } from "express";
 import cors from "cors";
 import helmet from "helmet";
 
@@ -8,6 +8,7 @@ import { errorHandler } from "./middleware/error-handling.js";
 import { authTestRouter } from "./routes/auth-test.routes.js";
 import { accountRouter } from "./modules/account/account.routes.js";
 import { candidateRouter } from "./modules/candidate/candidate.route.js";
+import { jobRouter } from "./modules/jobs/job.routes.js";
 
 export const app = express();
 
@@ -25,7 +26,17 @@ app.use(
 
 app.use(express.json({ limit: "1mb" }));
 
-app.use(pinoHttp({ autoLogging: false }));
+app.use(
+  pinoHttp({
+    autoLogging: false,
+    redact: [
+      "req.headers.authorization",
+      "req.headers.cookie",
+      "headers.authorization",
+      "headers.cookie",
+    ],
+  }),
+);
 
 app.get("/", (_request, response) => {
   response.status(200).json({
@@ -46,6 +57,7 @@ app.get("/health", (_request, response) => {
 app.use("/v1/auth-test", authTestRouter);
 app.use("/v1", accountRouter);
 app.use("/v1/candidate", candidateRouter);
+app.use("/v1/jobs", jobRouter);
 app.use((request, response) => {
   response.status(404).json({
     error: {
@@ -54,4 +66,32 @@ app.use((request, response) => {
     },
   });
 });
-app.use(errorHandler);
+
+const globalErrorHandler: ErrorRequestHandler = (
+  error,
+  _request,
+  response,
+  _next,
+) => {
+  console.error(
+    "Unhandled backend error:",
+    error instanceof Error
+      ? {
+          name: error.name,
+          message: error.message,
+          stack: error.stack,
+        }
+      : error,
+  );
+
+  response.status(500).json({
+    error: {
+      code: "INTERNAL_SERVER_ERROR",
+      message:
+        error instanceof Error
+          ? error.message
+          : "An unexpected error occurred.",
+    },
+  });
+};
+app.use(globalErrorHandler);
