@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { generateCandidateProfile } from "./candidate-profile.service.js";
+import { supabaseAdmin } from "../../config/supabase.js";
 
 export async function generateSkillsProfile(
   request: Request,
@@ -26,5 +27,54 @@ export async function generateSkillsProfile(
       ...result.profile,
       generated: result.generated,
     },
+  });
+}
+
+export async function getActiveSkillsProfile(
+  request: Request,
+  response: Response,
+) {
+  const { data: document, error: documentError } = await supabaseAdmin
+    .from("candidate_documents")
+    .select("id")
+    .eq("user_id", request.auth?.userId)
+    .eq("document_type", "cv")
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (documentError) throw documentError;
+
+  if (!document) {
+    return response.status(404).json({
+      error: {
+        code: "ACTIVE_CV_NOT_FOUND",
+        message: "No active CV was found.",
+      },
+    });
+  }
+
+  const { data: profile, error: profileError } = await supabaseAdmin
+    .from("candidate_profiles")
+    .select(
+      `
+          id,
+          cv_document_id,
+          skills_profile,
+          cv_hash,
+          schema_hash,
+          model,
+          created_at
+        `,
+    )
+    .eq("user_id", request.auth?.userId)
+    .eq("cv_document_id", document.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (profileError) throw profileError;
+
+  return response.status(200).json({
+    data: profile,
   });
 }

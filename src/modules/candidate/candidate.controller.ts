@@ -153,3 +153,30 @@ export async function uploadCandidateDocument(
     });
   }
 }
+export async function listCandidateDocuments(
+  request: Request,
+  response: Response,
+) {
+  const { data, error } = await supabaseAdmin
+    .from("candidate_documents")
+    .select(
+      `
+    id,
+    document_type,
+    filename,
+    revision,
+    is_active,
+    created_at,
+    updated_at
+  `,
+    )
+    .eq("user_id", request.auth?.userId)
+    .eq("is_active", true)
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+
+  return response.status(200).json({
+    data,
+  });
+}
