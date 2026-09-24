@@ -9,6 +9,7 @@ import { authTestRouter } from "./routes/auth-test.routes.js";
 import { accountRouter } from "./modules/account/account.routes.js";
 import { candidateRouter } from "./modules/candidate/candidate.route.js";
 import { jobRouter } from "./modules/jobs/job.routes.js";
+import { rankingRouter } from "./modules/rankings/ranking.routes.js";
 
 export const app = express();
 
@@ -58,6 +59,7 @@ app.use("/v1/auth-test", authTestRouter);
 app.use("/v1", accountRouter);
 app.use("/v1/candidate", candidateRouter);
 app.use("/v1/jobs", jobRouter);
+app.use("/v1/ranking-runs", rankingRouter);
 app.use((request, response) => {
   response.status(404).json({
     error: {

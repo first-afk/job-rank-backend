@@ -18,8 +18,14 @@ export async function searchJobs(request: Request, response: Response) {
   }
 
   const providerJobs = await searchJobsDb(parsed.data);
-
+  console.log("JobsDB provider results:", {
+    count: providerJobs.length,
+  });
   const jobs = await saveSearchResults(request.auth?.userId, providerJobs);
+
+  console.log("Saved normalized jobs:", {
+    count: jobs.length,
+  });
 
   return response.status(200).json({
     data: jobs,

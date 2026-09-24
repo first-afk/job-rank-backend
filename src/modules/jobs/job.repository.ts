@@ -2,9 +2,39 @@ import { createHash } from "node:crypto";
 import { supabaseAdmin } from "../../config/supabase.js";
 
 function normalizeJob(job: Record<string, unknown>) {
-  const externalId = String(job.id ?? job.job_id ?? job.url ?? "");
+  const title = job.title?.toString().trim() ?? "";
 
-  const description = String(job.description ?? "");
+  const locations = Array.isArray(job.locations_derived)
+    ? job.locations_derived.map((value: unknown) => String(value)).join(" / ")
+    : "";
+
+  const location =
+    locations ||
+    job.address_locality?.toString() ||
+    job.location?.toString() ||
+    "";
+
+  const description =
+    job.description_text?.toString() || job.description?.toString() || "";
+
+  const applicationUrl = job.url?.toString() ?? "";
+
+  const fallbackId = createHash("sha256")
+    .update(
+      [
+        title,
+        job.organization ?? job.company ?? "",
+        location,
+        applicationUrl,
+      ].join("|"),
+    )
+    .digest("hex");
+
+  const externalId =
+    job.id?.toString() ||
+    job.job_id?.toString() ||
+    applicationUrl ||
+    fallbackId;
 
   return {
     external_id: externalId,

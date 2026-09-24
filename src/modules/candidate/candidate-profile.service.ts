@@ -60,7 +60,7 @@ export async function generateCandidateProfile(
   const cvHash = hash(document.extracted_text);
 
   // Return an existing profile instead of paying for another request.
-  const { data: existing } = await supabaseAdmin
+  const { data: existing, error: existingError } = await supabaseAdmin
     .from("candidate_profiles")
     .select("*")
     .eq("user_id", userId)
@@ -70,11 +70,31 @@ export async function generateCandidateProfile(
     .maybeSingle();
 
   if (existing) {
+    if (existing.cv_document_id !== document.id) {
+      const { data: updatedProfile, error: updateError } = await supabaseAdmin
+        .from("candidate_profiles")
+        .update({
+          cv_document_id: document.id,
+        })
+        .eq("id", existing.id)
+        .eq("user_id", userId)
+        .select()
+        .single();
+
+      if (updateError) throw updateError;
+
+      return {
+        profile: updatedProfile,
+        generated: false,
+      };
+    }
+
     return {
       profile: existing,
       generated: false,
     };
   }
+  if (existingError) throw existingError;
 
   const apiKey = process.env.OPENROUTER_API_KEY;
 

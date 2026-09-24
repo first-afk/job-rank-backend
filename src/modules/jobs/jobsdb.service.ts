@@ -5,7 +5,46 @@ function resolveTimeFrame(days: number) {
   if (days <= 7) return "7d";
   return "6m";
 }
+const countryNames: Record<string, string> = {
+  GB: "United Kingdom",
+  US: "United States",
+  NG: "Nigeria",
+  CA: "Canada",
+  AU: "Australia",
+};
 
+function formatLocations(countryCodes: string[]) {
+  return countryCodes
+    .map((code) => countryNames[code] ?? code)
+    .map((country) => (country.includes(" ") ? `"${country}"` : country))
+    .join(" OR ");
+}
+
+function extractProviderJobs(body: unknown): Record<string, unknown>[] {
+  if (Array.isArray(body)) {
+    return body.filter(
+      (item): item is Record<string, unknown> =>
+        typeof item === "object" && item !== null && !Array.isArray(item),
+    );
+  }
+
+  if (typeof body === "object" && body !== null) {
+    const object = body as Record<string, unknown>;
+
+    for (const key of ["data", "jobs", "results", "items"]) {
+      const value = object[key];
+
+      if (Array.isArray(value)) {
+        return value.filter(
+          (item): item is Record<string, unknown> =>
+            typeof item === "object" && item !== null && !Array.isArray(item),
+        );
+      }
+    }
+  }
+
+  throw new Error("JobsDB returned an unexpected response structure.");
+}
 export async function searchJobsDb(input: JobSearchInput) {
   const host = process.env.JOBSDB_API_HOST;
   const endpoint = process.env.JOBSDB_API_ENDPOINT;
@@ -26,10 +65,7 @@ export async function searchJobsDb(input: JobSearchInput) {
   if (input.city) {
     parameters.set("location", input.city);
   } else if (input.countryCodes.length > 0) {
-    parameters.set(
-      "location",
-      input.countryCodes.map((code) => `"${code}"`).join(" OR "),
-    );
+    parameters.set("location", formatLocations(input.countryCodes));
   }
 
   if (input.isRemote) {
@@ -46,16 +82,30 @@ export async function searchJobsDb(input: JobSearchInput) {
       "x-rapidapi-host": host,
     },
   });
-
+  const responseText = await response.text();
+  console.log("JobsDB response:", {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    responseLength: responseText.length,
+    responsePreview: responseText.slice(0, 300),
+  });
   if (!response.ok) {
     throw new Error(`JobsDB returned status ${response.status}.`);
   }
 
-  const body = await response.json();
+  let body: unknown;
 
-  if (Array.isArray(body)) return body;
-  if (Array.isArray(body.jobs)) return body.jobs;
-  if (Array.isArray(body.data)) return body.data;
+  try {
+    body = JSON.parse(responseText);
+  } catch {
+    throw new Error("JobsDB returned an invalid JSON response.");
+  }
 
-  throw new Error("JobsDB returned an unexpected response.");
+  return extractProviderJobs(body);
+
+  // if (Array.isArray(body)) return body;
+  // if (Array.isArray(body.jobs)) return body.jobs;
+  // if (Array.isArray(body.data)) return body.data;
+
+  // throw new Error("JobsDB returned an unexpected response.");
 }
