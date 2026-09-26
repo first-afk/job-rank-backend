@@ -4,7 +4,7 @@
   "description": "Backend API for the Job Rank applications",
   "main": "dist/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --import tsx --test tests/*.test.ts",
     "dev": "tsx watch src/server.ts",
     "type-check": "tsc --noEmit",
     "build": "tsc",
