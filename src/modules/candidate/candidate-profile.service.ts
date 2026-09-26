@@ -23,6 +23,7 @@ export async function loadCandidateSchema() {
   return { schemaText, schemaHash: hash(schemaText), policyVersion };
 }
 
+/** Reject superseded or foreign CVs before their profiles can be reused or published. */
 export async function assertActiveCv(userId: string, documentId: string) {
   const { data, error } = await supabaseAdmin
     .from("candidate_documents")
@@ -56,6 +57,7 @@ ${cvContent}
 `;
 }
 
+/** Generate or reuse a profile for the active CV, rechecking ownership around saved results. */
 export async function generateCandidateProfile(
   userId: string,
   documentId: string,
@@ -95,6 +97,7 @@ export async function generateCandidateProfile(
 
   if (existing) {
     await assertActiveCv(userId, document.id);
+    // Rebind identical CV content to its new document, then reject a superseded selection.
     if (existing.cv_document_id !== document.id) {
       const { data: updatedProfile, error: updateError } = await supabaseAdmin
         .from("candidate_profiles")

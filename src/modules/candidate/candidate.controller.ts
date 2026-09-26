@@ -182,6 +182,7 @@ export async function listCandidateDocuments(
   });
 }
 
+/** Deactivate only the requested owned document, preserving history and later replacements. */
 export async function deactivateCandidateDocument(
   request: Request,
   response: Response,

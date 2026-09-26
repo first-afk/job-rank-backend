@@ -7,6 +7,7 @@ import {
 } from "./candidate-profile.service.js";
 import { supabaseAdmin } from "../../config/supabase.js";
 
+/** Return generated skills with their current schema, or a retryable candidate-change response. */
 export async function generateSkillsProfile(
   request: Request,
   response: Response,
@@ -22,6 +23,7 @@ export async function generateSkillsProfile(
     });
   }
 
+  // Publish only after the saved profile still matches the active CV and schema.
   try {
     const result = await generateCandidateProfile(
       request.auth!.userId,
@@ -51,6 +53,7 @@ export async function generateSkillsProfile(
   }
 }
 
+/** Expose only the current CV profile with matching schema and policy so stale skills are not reused. */
 export async function getActiveSkillsProfile(
   request: Request,
   response: Response,
