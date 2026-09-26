@@ -3,10 +3,38 @@ import { createHash } from "node:crypto";
 import { supabaseAdmin } from "../../config/supabase.js";
 import { Ajv } from "ajv";
 
-const policyVersion = "1.0.0";
+const policyVersion = "1.0.1";
 
 function hash(value: string) {
   return createHash("sha256").update(value).digest("hex");
+}
+
+export class CandidateContextChangedError extends Error {
+  constructor() {
+    super("Your CV or profile schema changed. Please try again.");
+  }
+}
+
+export async function loadCandidateSchema() {
+  const schemaText = await readFile(
+    new URL("../../../resources/skills.json", import.meta.url),
+    "utf8",
+  );
+  return { schemaText, schemaHash: hash(schemaText), policyVersion };
+}
+
+export async function assertActiveCv(userId: string, documentId: string) {
+  const { data, error } = await supabaseAdmin
+    .from("candidate_documents")
+    .select("id")
+    .eq("id", documentId)
+    .eq("user_id", userId)
+    .eq("document_type", "cv")
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new CandidateContextChangedError();
 }
 
 function buildPrompt(cvContent: string, schema: Record<string, unknown>) {
@@ -29,7 +57,7 @@ ${cvContent}
 }
 
 export async function generateCandidateProfile(
-  userId: string | undefined,
+  userId: string,
   documentId: string,
 ) {
   const { data: document, error: documentError } = await supabaseAdmin
@@ -38,23 +66,19 @@ export async function generateCandidateProfile(
     .eq("id", documentId)
     .eq("user_id", userId)
     .eq("document_type", "cv")
-    .single();
+    .eq("is_active", true)
+    .maybeSingle();
 
-  if (documentError || !document) {
-    throw new Error("CV document was not found.");
-  }
+  if (documentError) throw documentError;
+  if (!document) throw new CandidateContextChangedError();
 
   if (!document.extracted_text?.trim()) {
     throw new Error("The CV does not contain extractable text.");
   }
 
-  const schemaText = await readFile(
-    new URL("../../../resources/skills.json", import.meta.url),
-    "utf8",
-  );
+  const { schemaText, schemaHash } = await loadCandidateSchema();
 
   const schema = JSON.parse(schemaText);
-  const schemaHash = hash(schemaText);
   const model =
     process.env.SKILLS_JSON_GENERATION_MODEL ?? "openai/gpt-5.6-luna";
   const cvHash = hash(document.extracted_text);
@@ -70,6 +94,7 @@ export async function generateCandidateProfile(
     .maybeSingle();
 
   if (existing) {
+    await assertActiveCv(userId, document.id);
     if (existing.cv_document_id !== document.id) {
       const { data: updatedProfile, error: updateError } = await supabaseAdmin
         .from("candidate_profiles")
@@ -82,6 +107,8 @@ export async function generateCandidateProfile(
         .single();
 
       if (updateError) throw updateError;
+
+      await assertActiveCv(userId, document.id);
 
       return {
         profile: updatedProfile,
@@ -101,6 +128,8 @@ export async function generateCandidateProfile(
   if (!apiKey) {
     throw new Error("OPENROUTER_API_KEY is not configured.");
   }
+
+  await assertActiveCv(userId, document.id);
 
   const openRouterResponse = await fetch(
     "https://openrouter.ai/api/v1/chat/completions",
@@ -156,6 +185,7 @@ export async function generateCandidateProfile(
     type: "object",
     properties: schema,
     required: Object.keys(schema),
+    additionalProperties: false,
   };
 
   const ajv = new Ajv({ allErrors: true });
@@ -165,6 +195,8 @@ export async function generateCandidateProfile(
     console.error("Skills profile validation failed:", validate.errors);
     throw new Error("Generated skills profile did not match the schema.");
   }
+
+  await assertActiveCv(userId, document.id);
 
   const { data: profile, error: profileError } = await supabaseAdmin
     .from("candidate_profiles")
@@ -181,6 +213,8 @@ export async function generateCandidateProfile(
     .single();
 
   if (profileError) throw profileError;
+
+  await assertActiveCv(userId, document.id);
 
   return {
     profile,

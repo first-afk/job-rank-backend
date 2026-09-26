@@ -1,5 +1,10 @@
 import type { Request, Response } from "express";
-import { generateCandidateProfile } from "./candidate-profile.service.js";
+import {
+  assertActiveCv,
+  CandidateContextChangedError,
+  generateCandidateProfile,
+  loadCandidateSchema,
+} from "./candidate-profile.service.js";
 import { supabaseAdmin } from "../../config/supabase.js";
 
 export async function generateSkillsProfile(
@@ -17,17 +22,33 @@ export async function generateSkillsProfile(
     });
   }
 
-  const result = await generateCandidateProfile(
-    request.auth?.userId,
-    documentId,
-  );
+  try {
+    const result = await generateCandidateProfile(
+      request.auth!.userId,
+      documentId,
+    );
+    const schema = await loadCandidateSchema();
+    if (
+      result.profile.schema_hash !== schema.schemaHash ||
+      result.profile.policy_version !== schema.policyVersion
+    ) {
+      throw new CandidateContextChangedError();
+    }
+    await assertActiveCv(request.auth!.userId, documentId);
 
-  return response.status(result.generated ? 201 : 200).json({
-    data: {
-      ...result.profile,
-      generated: result.generated,
-    },
-  });
+    return response.status(result.generated ? 201 : 200).json({
+      data: {
+        ...result.profile,
+        schema_json: schema.schemaText,
+        generated: result.generated,
+      },
+    });
+  } catch (error) {
+    if (!(error instanceof CandidateContextChangedError)) throw error;
+    return response.status(409).json({
+      error: { code: "CANDIDATE_CONTEXT_CHANGED", message: error.message },
+    });
+  }
 }
 
 export async function getActiveSkillsProfile(
@@ -62,6 +83,7 @@ export async function getActiveSkillsProfile(
           skills_profile,
           cv_hash,
           schema_hash,
+          policy_version,
           model,
           created_at
         `,
@@ -74,7 +96,24 @@ export async function getActiveSkillsProfile(
 
   if (profileError) throw profileError;
 
+  if (!profile) return response.status(200).json({ data: null });
+
+  const schema = await loadCandidateSchema();
+  if (
+    profile.schema_hash !== schema.schemaHash ||
+    profile.policy_version !== schema.policyVersion
+  ) {
+    return response.status(200).json({ data: null });
+  }
+
+  try {
+    await assertActiveCv(request.auth!.userId, document.id);
+  } catch (error) {
+    if (!(error instanceof CandidateContextChangedError)) throw error;
+    return response.status(200).json({ data: null });
+  }
+
   return response.status(200).json({
-    data: profile,
+    data: { ...profile, schema_json: schema.schemaText },
   });
 }

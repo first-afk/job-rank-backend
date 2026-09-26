@@ -164,6 +164,7 @@ export async function listCandidateDocuments(
     id,
     document_type,
     filename,
+    extracted_text,
     revision,
     is_active,
     created_at,
@@ -179,4 +180,20 @@ export async function listCandidateDocuments(
   return response.status(200).json({
     data,
   });
+}
+
+export async function deactivateCandidateDocument(
+  request: Request,
+  response: Response,
+) {
+  const { error } = await supabaseAdmin
+    .from("candidate_documents")
+    .update({ is_active: false })
+    .eq("id", request.params.id)
+    .eq("user_id", request.auth!.userId)
+    .eq("is_active", true);
+
+  if (error) throw error;
+
+  return response.status(204).send();
 }
