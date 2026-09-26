@@ -4,11 +4,12 @@
   "description": "Backend API for the Job Rank applications",
   "main": "dist/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --import tsx --test tests/*.test.ts",
     "dev": "tsx watch src/server.ts",
     "type-check": "tsc --noEmit",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test:database": "node --test tests/candidate-document.database.mjs"
   },
   "keywords": [
     "job-ranking",
@@ -38,6 +39,7 @@
     "@types/express": "^5.0.6",
     "@types/multer": "^2.2.0",
     "@types/node": "^26.4.1",
+    "pg": "8.23.0",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   }
