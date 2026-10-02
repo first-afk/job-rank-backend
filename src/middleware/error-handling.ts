@@ -24,6 +24,7 @@ export const errorHandler: ErrorRequestHandler = (
   response: Response,
   next: NextFunction,
 ) => {
+  /** Map known failures to safe public errors and delegate responses already started. */
   if (response.headersSent) {
     next(error);
     return;

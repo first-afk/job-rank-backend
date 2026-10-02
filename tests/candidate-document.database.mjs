@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import pg from "pg";
 test("atomic document replacement and server-only execution", async () => {
+  /** Use a disposable schema to prove atomic replacement and caller permissions. */
   const databaseUrl = process.env.TEST_DATABASE_URL;
   assert.ok(
     databaseUrl,
@@ -44,6 +45,7 @@ test("atomic document replacement and server-only execution", async () => {
       ],
     );
   try {
+    // Build disposable fixtures and verify transactions and service-only execution.
     const owner = await connect();
     const existing = await owner.query(
       "select tablename from pg_tables where schemaname not in ('pg_catalog', 'information_schema')",

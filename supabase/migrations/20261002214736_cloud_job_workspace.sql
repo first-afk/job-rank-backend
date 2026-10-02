@@ -17,6 +17,7 @@ declare item jsonb; job_uuid uuid; kept uuid[] := '{}'; result jsonb := '[]';
 begin
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(p_user_id::text || ':jobs', 0));
   for item in select value from pg_catalog.jsonb_array_elements(p_jobs) loop
+    -- Upsert shared postings while replacing or preserving only this owner’s annotations.
     insert into public.jobs (source, external_id, title, company_name, location, description, application_url, provider_payload, last_fetched_at)
     values (item->>'source', item->>'id', item->>'title', item->>'companyName', item->>'location', item->>'description', item->>'url', case when pg_catalog.jsonb_typeof(item->'apiJobData') = 'object' then item->'apiJobData' else '{}'::jsonb end, now())
     on conflict (source, external_id) do update set title = excluded.title, company_name = excluded.company_name,

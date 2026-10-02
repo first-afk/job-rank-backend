@@ -2,6 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 test("document publication and storage compensation", async (t) => {
+  /** Exercise upload publication and compensation without touching live accounts. */
   Object.assign(process.env, {
     DOTENV_CONFIG_PATH: new URL("./fixtures/no-runtime-env", import.meta.url)
       .pathname,
@@ -33,6 +34,7 @@ test("document publication and storage compensation", async (t) => {
     "storage_error",
   ];
   for (const scenario of scenarios) {
+    // Run each isolated upload outcome against the same publication contract.
     let committed = false;
     let oldActive = true;
     let objects = 0;
@@ -40,6 +42,7 @@ test("document publication and storage compensation", async (t) => {
     let rpcCalls = 0;
     let logged = "";
     await t.test(scenario, async () => {
+      /** Isolate each transport outcome and check whether storage cleanup is safe. */
       const originalError = console.error;
       console.error = (...args) => {
         logged += JSON.stringify(args);
@@ -66,6 +69,7 @@ test("document publication and storage compensation", async (t) => {
         },
       })) as any;
       supabaseAdmin.rpc = ((name: string, args: any) => ({
+        /** Distinguish confirmed database rejection from an unknown commit outcome. */
         single: async () => {
           rpcCalls++;
           assert.equal(name, "replace_candidate_document");
@@ -115,6 +119,7 @@ test("document publication and storage compensation", async (t) => {
         },
       };
       try {
+        // Exercise the actual upload handler while ensuring logging is restored afterward.
         await uploadCandidateDocument(
           {
             auth: { userId: "synthetic-user" },

@@ -10,3 +10,5 @@ Ranking uses the active CV/profile, current schema/policy, owner job memberships
 Configure `JOBRANK_CLASSIFIER` (`jev` default or `llm`), `TYPESAFE_API_KEY`/`JEV_MODEL` for Jev, or `OPENROUTER_API_KEY`/`JOBRANK_RANKING_MODEL` for LLM. Search needs a subscribed `JOBSDB_API_KEY`; ATS and LinkedIn host/endpoint settings must match that subscription. Keep keys in server configuration.
 
 Run `npm run type-check`, `npm test`, and `TEST_DATABASE_URL=... npm run test:database` with a disposable PostgreSQL database. Storage-policy SQL tests require the migration test schema. Live verification in this task used the branch API on loopback against real Supabase and provider services; upstream deployment is still a separate action.
+
+Workspace reads paginate using exact owner counts, including deployments with a smaller REST row cap. Rating snapshots carry profile and job-input identities and are joined through the owner’s valid cache, independently of browser snapshot writes. Intermediate progress writes are best effort; final publication waits for all admitted workers.

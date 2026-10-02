@@ -1,3 +1,4 @@
+import { rankingVersion } from "./ranking.configuration.js";
 import { AppError } from "../../middleware/error-handling.js";
 import { loadCandidateSchema } from "../candidate/candidate-profile.service.js";
 import { supabaseAdmin } from "../../config/supabase.js";
@@ -6,6 +7,7 @@ export async function createRankingRun(
   userId: string | undefined,
   jobIds: string[],
 ) {
+  /** Validate current candidate evidence and owned jobs before admitting a run. */
   const { data: activeCv, error: cvError } = await supabaseAdmin
     .from("candidate_documents")
     .select("id")
@@ -54,7 +56,7 @@ export async function createRankingRun(
       user_id: userId,
       candidate_profile_id: profile.id,
       total_jobs: jobIds.length,
-      ranking_version: "0.0.23",
+      ranking_version: rankingVersion,
     })
     .select()
     .single();

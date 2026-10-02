@@ -1,4 +1,5 @@
-import { rankingConfiguration } from "./ranking.configuration.js";
+import { createHash } from "node:crypto";
+import { rankingConfiguration, rankingVersion } from "./ranking.configuration.js";
 import { supabaseAdmin } from "../../config/supabase.js";
 import { buildRankingPrompt } from "./ranking.prompt.js";
 import { calculateCandidateScore } from "./ranking.score.js";
@@ -6,7 +7,6 @@ import { calculateCandidateScore } from "./ranking.score.js";
 import { rankWithJev, scoreProjection, validateAnalysis } from "./ranking.projection.js";
 import { assertActiveCv, loadCandidateSchema } from "../candidate/candidate-profile.service.js";
 
-const rankingVersion = "0.0.23";
 
 type DatabaseJob = {
   id: string;
@@ -281,6 +281,8 @@ async function rankOneJob(
 
     const { error: resultError } = await supabaseAdmin.from("ranking_run_jobs")
       .update({ status: "rated", completed_at: new Date().toISOString(), result_snapshot: {
+        candidate_profile_id: context.candidateProfileId,
+        job_input_identity: createHash("sha256").update(JSON.stringify({ description: job.description })).digest("hex"),
         job_id: job.id, analysis: result.analysis, prescriptive_score: score, ranking_version: rankingVersion,
         status: "rated", model: context.model, resolved_model: typed?.model ?? context.model, classifier: context.classifier,
         rated_at: new Date().toISOString(), verified_location: verifiedLocation ?? null, location_mismatch: locationMismatch ?? false,
@@ -310,33 +312,44 @@ async function rankOneJob(
   }
 }
 
+/** Drain admitted work before reporting a persistence failure or a terminal run. */
 async function processWithConcurrency<T>(
   items: T[],
   concurrency: number,
   handler: (item: T) => Promise<void>,
 ) {
   let nextIndex = 0;
+  let firstFailure: unknown;
 
+  /** Continue the shared queue after a failed item so no admitted work escapes the run. */
   async function worker() {
+    // Observe all admitted tasks before surfacing the first persistence failure.
     while (true) {
       const index = nextIndex++;
 
       if (index >= items.length) return;
 
-      await handler(items[index]!);
+      try {
+        await handler(items[index]!);
+      } catch (error) {
+        firstFailure ??= error;
+      }
     }
   }
 
   const workerCount = Math.min(concurrency, items.length);
 
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  if (firstFailure) throw firstFailure;
 }
 
+/** Own one run until all job results are settled and final counters are stored. */
 export async function processRankingRun(
   runId: string,
   userId: string | undefined,
   jobIds: string[],
 ) {
+  // Intermediate progress is best effort; final publication waits for settled results.
   try {
     const { error: startError } = await supabaseAdmin
       .from("ranking_runs")
@@ -388,6 +401,7 @@ export async function processRankingRun(
     await processWithConcurrency(
       jobs as DatabaseJob[],
       concurrency,
+      /** Publish settled per-job counts in order without abandoning other workers. */
       async (job) => {
         const succeeded = await rankOneJob(context, job);
 
@@ -398,10 +412,13 @@ export async function processRankingRun(
         }
 
         progressWrite = progressWrite.then(async () => {
+          // Progress failures must not detach the workers from their parent run.
           const { error } = await supabaseAdmin.from("ranking_runs")
             .update({ processed_jobs: completedJobs + failedJobs, succeeded_jobs: completedJobs, failed_jobs: failedJobs })
             .eq("id", runId).eq("user_id", userId);
           if (error) throw error;
+        }).catch(error => {
+          console.error("Could not save ranking progress:", { runId, message: error instanceof Error ? error.message : "Database write failed." });
         });
         await progressWrite;
       },

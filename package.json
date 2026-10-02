@@ -9,7 +9,7 @@
     "type-check": "tsc --noEmit",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test:database": "node --test tests/candidate-document.database.mjs"
+    "test:database": "node --test --test-concurrency=1 tests/candidate-document.database.mjs tests/job-workspace.database.mjs"
   },
   "keywords": [
     "job-ranking",

@@ -65,6 +65,7 @@ function request(port: number, path: string, body?: string, contentType = 'appli
 }
 
 test('installed app returns safe auth and JSON errors over HTTP', async () => {
+  /** Exercise the real HTTP parser and auth boundary with synthetic failures. */
   await withServer(app, async port => {
     const cases = [
       ['/v1/me', undefined, 401, 'UNAUTHENTICATED'],
@@ -82,6 +83,7 @@ test('installed app returns safe auth and JSON errors over HTTP', async () => {
 });
 
 test('shared handler maps application, Zod, Multer, and unknown errors without a logger', async () => {
+  /** Expose synthetic routes to check public classification without leaking private errors. */
   const fixture = express();
   fixture.get('/forbidden', () => { throw new AppError(403, 'ACCOUNT_INACTIVE', 'This account is inactive.'); });
   fixture.get('/not-found', () => { throw new AppError(404, 'ACCOUNT_NOT_FOUND', 'Account not found.'); });
@@ -92,6 +94,7 @@ test('shared handler maps application, Zod, Multer, and unknown errors without a
   fixture.post('/candidate-upload', candidateDocumentUpload.single('file'), (_req, res) => res.sendStatus(204));
   fixture.use(errorHandler);
   await withServer(fixture, async port => {
+    /** Assert safe HTTP envelopes and verify that the private error canary stays hidden. */
     for (const [path, expectedStatus, expectedCode] of [
       ['/forbidden', 403, 'ACCOUNT_INACTIVE'], ['/not-found', 404, 'ACCOUNT_NOT_FOUND'],
       ['/validation', 422, 'VALIDATION_ERROR'], ['/unknown', 500, 'INTERNAL_SERVER_ERROR'],
@@ -118,6 +121,7 @@ test('shared handler maps application, Zod, Multer, and unknown errors without a
 });
 
 test('logs contain only safe classification and headersSent delegates once', async () => {
+  /** Verify safe logs and once-only delegation after headers are sent. */
   const entries: unknown[] = [];
   const fixture = express();
   fixture.use((req, _res, next) => { req.log = { error: (...args: unknown[]) => entries.push(args) } as any; next(); });
