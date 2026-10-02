@@ -20,7 +20,7 @@ app.use(helmet());
 app.use(
   cors({
     origin: env.FRONTEND_URL,
-    methods: ["GET", "POST", "PATCH", "DELETE"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
@@ -37,6 +37,8 @@ app.use(
   }),
 );
 
+// Provider-rich job snapshots need a larger body than ordinary account requests.
+app.use("/v1/jobs/workspace", express.json({ limit: "10mb" }));
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/", (_request, response) => {

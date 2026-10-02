@@ -1,3 +1,4 @@
+import { AppError } from "../../middleware/error-handling.js";
 import type { JobSearchInput } from "./job-search.schema.js";
 
 function resolveTimeFrame(days: number) {
@@ -46,8 +47,8 @@ function extractProviderJobs(body: unknown): Record<string, unknown>[] {
   throw new Error("JobsDB returned an unexpected response structure.");
 }
 export async function searchJobsDb(input: JobSearchInput) {
-  const host = process.env.JOBSDB_API_HOST;
-  const endpoint = process.env.JOBSDB_API_ENDPOINT;
+  const host = input.sourceSite === "linkedin" ? process.env.JOBSDB_API_HOST_LINKEDIN : process.env.JOBSDB_API_HOST_ATS || process.env.JOBSDB_API_HOST;
+  const endpoint = input.sourceSite === "linkedin" ? process.env.LINKEDIN_API_ENDPOINT : process.env.JOBSDB_API_ENDPOINT || "/active-ats";
   const apiKey = process.env.JOBSDB_API_KEY;
 
   if (!host || !endpoint || !apiKey) {
@@ -57,7 +58,7 @@ export async function searchJobsDb(input: JobSearchInput) {
   const parameters = new URLSearchParams({
     description: input.query,
     time_frame: resolveTimeFrame(input.daysSincePosted),
-    offset: input.page.toString(),
+    offset: (input.page * input.limit).toString(),
     limit: input.limit.toString(),
     description_format: "text",
   });
@@ -77,6 +78,7 @@ export async function searchJobsDb(input: JobSearchInput) {
   }
 
   const response = await fetch(`https://${host}${endpoint}?${parameters}`, {
+    signal: AbortSignal.timeout(30000),
     headers: {
       "x-rapidapi-key": apiKey,
       "x-rapidapi-host": host,
@@ -87,10 +89,11 @@ export async function searchJobsDb(input: JobSearchInput) {
     status: response.status,
     contentType: response.headers.get("content-type"),
     responseLength: responseText.length,
-    responsePreview: responseText.slice(0, 300),
   });
   if (!response.ok) {
-    throw new Error(`JobsDB returned status ${response.status}.`);
+    throw new AppError(502,"JOB_PROVIDER_UNAVAILABLE", response.status === 403
+      ? "The backend JobsDB key is not subscribed to this provider. Use an enabled public source or update the backend key."
+      : "The job provider is unavailable. Please try again.");
   }
 
   let body: unknown;

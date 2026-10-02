@@ -8,6 +8,7 @@ const updateProfileSchema = z.object({
 });
 
 const updatePreferencesSchema = z.object({
+  sourceSettings: z.record(z.string(), z.unknown()).optional(),
   searchQuery: z.string().max(200).optional(),
   sourceSite: z.string().min(1).optional(),
   locationMode: z.string().min(1).optional(),
@@ -123,9 +124,9 @@ export async function getPreferences(
       .from("user_preferences")
       .select("*")
       .eq("user_id", userId)
-      .single();
+      .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
       throw new AppError(
         404,
         "PREFERENCES_NOT_FOUND",
@@ -133,7 +134,7 @@ export async function getPreferences(
       );
     }
 
-    response.json({ data });
+    response.json({ data: data ?? { source_site: "configured", location_mode: "all", country_scope: "global", jobs_fetch_limit: 50 } });
   } catch (error) {
     next(error);
   }
@@ -149,6 +150,7 @@ export async function updatePreferences(
     const userId = request.auth!.userId;
 
     const updates = {
+      ...(input.sourceSettings !== undefined && { source_settings: input.sourceSettings }),
       ...(input.searchQuery !== undefined && {
         search_query: input.searchQuery,
       }),
@@ -191,8 +193,7 @@ export async function updatePreferences(
 
     const { data, error } = await supabaseAdmin
       .from("user_preferences")
-      .update(updates)
-      .eq("user_id", userId)
+      .upsert({ user_id: userId, ...updates }, { onConflict: "user_id" })
       .select()
       .single();
 

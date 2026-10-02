@@ -8,7 +8,7 @@ function collectScores(value: unknown, scores: number[]): boolean {
   if (typeof value === "object" && value !== null) {
     const values = Object.values(value);
 
-    if (values.length === 0) return false;
+    if (values.length === 0) return true;
 
     return values.every((item) => collectScores(item, scores));
   }
@@ -35,6 +35,8 @@ export function calculateCandidateScore(analysis: Record<string, any>) {
     throw new Error("Ranking response contains an invalid score tree.");
   }
 
+  if (scores.length === 0) return 0;
+
   const offset = 0.1;
 
   const logSum = scores.reduce(
@@ -43,7 +45,7 @@ export function calculateCandidateScore(analysis: Record<string, any>) {
   );
 
   const geometricMean = Math.exp(logSum / scores.length);
-  const normalized = (geometricMean - offset) / (1 + offset);
+  const normalized = geometricMean - offset;
 
   return Math.min(1, Math.max(0, normalized));
 }

@@ -3,6 +3,7 @@ import { jobSearchSchema } from "./job-search.schema.js";
 import { searchJobsDb } from "./jobsdb.service.js";
 import { saveSearchResults } from "./job.repository.js";
 import z from "zod";
+import { saveSearch } from "./search.repository.js";
 
 export async function searchJobs(request: Request, response: Response) {
   const parsed = jobSearchSchema.safeParse(request.body);
@@ -21,7 +22,8 @@ export async function searchJobs(request: Request, response: Response) {
   console.log("JobsDB provider results:", {
     count: providerJobs.length,
   });
-  const jobs = await saveSearchResults(request.auth?.userId, providerJobs);
+  const jobs = await saveSearchResults(request.auth!.userId, providerJobs, parsed.data.sourceSite);
+  await saveSearch(request.auth!.userId, parsed.data);
 
   console.log("Saved normalized jobs:", {
     count: jobs.length,

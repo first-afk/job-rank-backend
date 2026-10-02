@@ -1,3 +1,4 @@
+import { getSearchHistory, saveSearchHistory } from "../jobs/search.controller.js";
 import { Router } from "express";
 import { authenticate } from "../../middleware/authenticate.js";
 import { requireActiveAccount } from "../../middleware/require-active-account.js";
@@ -18,3 +19,6 @@ accountRouter.patch("/me", updateMe);
 
 accountRouter.get("/preferences", getPreferences);
 accountRouter.patch("/preferences", updatePreferences);
+
+accountRouter.get("/search-history", getSearchHistory);
+accountRouter.put("/search-history", saveSearchHistory);

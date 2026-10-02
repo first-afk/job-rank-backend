@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { supabaseAdmin } from "../../config/supabase.js";
 
-function normalizeJob(job: Record<string, unknown>) {
+export function normalizeJob(job: Record<string, unknown>, source = "jobsdb") {
   const title = job.title?.toString().trim() ?? "";
 
   const locations = Array.isArray(job.locations_derived)
@@ -38,10 +38,10 @@ function normalizeJob(job: Record<string, unknown>) {
 
   return {
     external_id: externalId,
-    source: "jobsdb",
+    source,
     title: String(job.title ?? ""),
     company_name: String(job.organization ?? job.company ?? ""),
-    location: String(job.location ?? ""),
+    location,
     description,
     application_url: String(job.url ?? ""),
     provider_date_posted:
@@ -57,10 +57,14 @@ function normalizeJob(job: Record<string, unknown>) {
 export async function saveSearchResults(
   userId: string | undefined,
   providerJobs: Record<string, unknown>[],
+  source = "jobsdb",
 ) {
-  const normalizedJobs = providerJobs
-    .map(normalizeJob)
-    .filter((job) => job.external_id && job.title);
+  // A provider can repeat a posting within a page. PostgreSQL cannot upsert
+  // the same conflict key twice in one statement.
+  const normalizedJobs = [...new Map(providerJobs
+    .map(job => normalizeJob(job, source))
+    .filter((job) => job.external_id && job.title)
+    .map((job) => [job.external_id, job])).values()];
 
   if (normalizedJobs.length === 0) return [];
 

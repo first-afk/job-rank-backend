@@ -1,9 +1,12 @@
-import { readFile } from "node:fs/promises";
+import { rankingConfiguration } from "./ranking.configuration.js";
 import { supabaseAdmin } from "../../config/supabase.js";
 import { buildRankingPrompt } from "./ranking.prompt.js";
 import { calculateCandidateScore } from "./ranking.score.js";
 
-const rankingVersion = "0.0.17";
+import { rankWithJev, scoreProjection, validateAnalysis } from "./ranking.projection.js";
+import { assertActiveCv, loadCandidateSchema } from "../candidate/candidate-profile.service.js";
+
+const rankingVersion = "0.0.23";
 
 type DatabaseJob = {
   id: string;
@@ -21,6 +24,8 @@ type RankingContext = {
   skillsProfile: unknown;
   schema: unknown;
   model: string;
+  classifier: "jev" | "llm";
+  cvDocumentId: string;
 };
 
 type OpenRouterResult = {
@@ -143,7 +148,7 @@ async function loadRankingContext(
 
   const { data: profile, error: profileError } = await supabaseAdmin
     .from("candidate_profiles")
-    .select("id, cv_document_id, skills_profile")
+    .select("id, cv_document_id, skills_profile, schema_hash, policy_version")
     .eq("id", run.candidate_profile_id)
     .eq("user_id", userId)
     .single();
@@ -163,10 +168,10 @@ async function loadRankingContext(
     throw new Error("The active CV does not contain extracted text.");
   }
 
-  const schemaText = await readFile(
-    new URL("../../../resources/skills.schema.json", import.meta.url),
-    "utf8",
-  );
+  await assertActiveCv(userId!, profile.cv_document_id);
+  const { schemaText, schemaHash, policyVersion } = await loadCandidateSchema();
+  if (profile.schema_hash !== schemaHash || profile.policy_version !== policyVersion) throw new Error("Candidate profile is no longer current.");
+  const { classifier, model } = rankingConfiguration();
 
   return {
     runId,
@@ -175,7 +180,9 @@ async function loadRankingContext(
     cvContent: document.extracted_text,
     skillsProfile: profile.skills_profile,
     schema: JSON.parse(schemaText),
-    model: process.env.JOBRANK_RANKING_MODEL?.trim() || "openai/gpt-5.6-luna",
+    classifier,
+    cvDocumentId: profile.cv_document_id,
+    model,
   };
 }
 
@@ -208,26 +215,9 @@ async function rankOneJob(
 ): Promise<boolean> {
   const attemptedAt = new Date().toISOString();
 
-  const { error: processingError } = await supabaseAdmin
-    .from("job_rankings")
-    .upsert(
-      {
-        run_id: context.runId,
-        user_id: context.userId,
-        job_id: job.id,
-        candidate_profile_id: context.candidateProfileId,
-        status: "processing",
-        ranking_version: rankingVersion,
-        attempted_version: rankingVersion,
-        attempted_at: attemptedAt,
-        processing_error: null,
-        model: context.model,
-      },
-      {
-        onConflict: "user_id,job_id,candidate_profile_id,ranking_version",
-      },
-    );
-
+  const { error: processingError } = await supabaseAdmin.from("ranking_run_jobs")
+    .update({ status: "processing", started_at: attemptedAt })
+    .eq("ranking_run_id", context.runId).eq("job_id", job.id);
   if (processingError) throw processingError;
 
   try {
@@ -238,19 +228,33 @@ async function rankOneJob(
       schema: context.schema,
     });
 
-    const result = await callOpenRouter(prompt, context.model);
+    await assertActiveCv(context.userId!, context.cvDocumentId);
+    const typed = context.classifier === "jev" ? await rankWithJev({ description: job.description, cv: context.cvContent,
+      profile: context.skillsProfile, schema: context.schema, model: context.model }) : null;
+    const result = typed ? { analysis: typed.analysis, providerRequestId: null, inputTokens: 0, outputTokens: 0, costUsd: 0 } : await callOpenRouter(prompt, context.model);
+    validateAnalysis(result.analysis, scoreProjection(context.skillsProfile));
+    await assertActiveCv(context.userId!, context.cvDocumentId);
 
+    // A removal or changed description must not publish an obsolete analysis.
+    const { data: association, error: associationError } = await supabaseAdmin
+      .from("user_jobs").select("job_id,jobs(description)")
+      .eq("user_id", context.userId).eq("job_id", job.id).maybeSingle();
+    if (associationError) throw associationError;
+    const currentJob = association?.jobs as unknown as { description: string } | null;
+    if (!association || currentJob?.description !== job.description) {
+      throw new Error("The saved job changed during ranking. Please retry.");
+    }
     const score = calculateCandidateScore(result.analysis);
 
-    const verifiedLocation = result.analysis["verified_location"];
+    const verifiedLocation = (result.analysis as Record<string, unknown>)["verified_location"];
 
-    const locationMismatch = result.analysis["location_mismatch"];
+    const locationMismatch = (result.analysis as Record<string, unknown>)["location_mismatch"];
 
     const { error: saveError } = await supabaseAdmin
       .from("job_rankings")
       .upsert(
         {
-          run_id: context.runId,
+          ranking_run_id: context.runId,
           user_id: context.userId,
           job_id: job.id,
           candidate_profile_id: context.candidateProfileId,
@@ -275,7 +279,14 @@ async function rankOneJob(
 
     if (saveError) throw saveError;
 
-    await saveUsage({ context, result });
+    const { error: resultError } = await supabaseAdmin.from("ranking_run_jobs")
+      .update({ status: "rated", completed_at: new Date().toISOString(), result_snapshot: {
+        job_id: job.id, analysis: result.analysis, prescriptive_score: score, ranking_version: rankingVersion,
+        status: "rated", model: context.model, resolved_model: typed?.model ?? context.model, classifier: context.classifier,
+        rated_at: new Date().toISOString(), verified_location: verifiedLocation ?? null, location_mismatch: locationMismatch ?? false,
+      } }).eq("ranking_run_id", context.runId).eq("job_id", job.id);
+    if (resultError) throw resultError;
+    if (context.classifier === "llm") await saveUsage({ context, result });
 
     return true;
   } catch (error) {
@@ -288,31 +299,12 @@ async function rankOneJob(
       error: publicMessage,
     });
 
-    const { error: saveFailureError } = await supabaseAdmin
-      .from("job_rankings")
-      .upsert(
-        {
-          run_id: context.runId,
-          user_id: context.userId,
-          job_id: job.id,
-          candidate_profile_id: context.candidateProfileId,
-          prescriptive_score: null,
-          analysis: null,
-          status: "failed",
-          ranking_version: rankingVersion,
-          attempted_version: rankingVersion,
-          attempted_at: attemptedAt,
-          processing_error: publicMessage,
-          model: context.model,
-        },
-        {
-          onConflict: "user_id,job_id,candidate_profile_id,ranking_version",
-        },
-      );
-
-    if (saveFailureError) {
-      console.error("Could not save failed ranking:", saveFailureError);
-    }
+    // Failed retries preserve the last valid rating. The run records its own failure.
+    const { error: saveFailureError } = await supabaseAdmin.from("ranking_run_jobs")
+      .update({ status: "failed", error_message: publicMessage, completed_at: new Date().toISOString(),
+        result_snapshot: { job_id: job.id, status: "failed", processing_error: publicMessage } })
+      .eq("ranking_run_id", context.runId).eq("job_id", job.id);
+    if (saveFailureError) throw saveFailureError;
 
     return false;
   }
@@ -381,6 +373,7 @@ export async function processRankingRun(
 
     let completedJobs = 0;
     let failedJobs = 0;
+    let progressWrite = Promise.resolve();
 
     const configuredConcurrency = Number.parseInt(
       process.env.RANKING_CONCURRENCY ?? "3",
@@ -404,26 +397,22 @@ export async function processRankingRun(
           failedJobs++;
         }
 
-        const { error: progressError } = await supabaseAdmin
-          .from("ranking_runs")
-          .update({
-            completed_jobs: completedJobs,
-            failed_jobs: failedJobs,
-          })
-          .eq("id", runId)
-          .eq("user_id", userId);
-
-        if (progressError) {
-          console.error("Could not update ranking progress:", progressError);
-        }
+        progressWrite = progressWrite.then(async () => {
+          const { error } = await supabaseAdmin.from("ranking_runs")
+            .update({ processed_jobs: completedJobs + failedJobs, succeeded_jobs: completedJobs, failed_jobs: failedJobs })
+            .eq("id", runId).eq("user_id", userId);
+          if (error) throw error;
+        });
+        await progressWrite;
       },
     );
 
     const { error: completeError } = await supabaseAdmin
       .from("ranking_runs")
       .update({
-        status: "completed",
-        completed_jobs: completedJobs,
+        status: failedJobs === 0 ? "completed" : completedJobs > 0 ? "partially_completed" : "failed",
+        processed_jobs: completedJobs + failedJobs,
+            succeeded_jobs: completedJobs,
         failed_jobs: failedJobs,
         completed_at: new Date().toISOString(),
       })
