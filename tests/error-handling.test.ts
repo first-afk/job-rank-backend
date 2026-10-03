@@ -36,6 +36,7 @@ const { errorHandler, AppError } = await import('../src/middleware/error-handlin
 const { candidateDocumentUpload } = await import('../src/modules/candidate/candidate_upload.middleware.js');
 const canary = 'PRIVATE_BODY_CANARY_20260926';
 
+/** Allow only the temporary loopback fixture and always close its connections. */
 async function withServer(application: express.Express, check: (port: number) => Promise<void>) {
   const server = application.listen(0, '127.0.0.1');
   try {
@@ -50,6 +51,7 @@ async function withServer(application: express.Express, check: (port: number) =>
   }
 }
 
+/** Read a bounded fixture response over the real local HTTP transport. */
 function request(port: number, path: string, body?: string, contentType = 'application/json') {
   return new Promise<{ status: number; text: string; json: any }>((resolve, reject) => {
     const req = realRequest({ hostname: '127.0.0.1', port, path, method: body === undefined ? 'GET' : 'POST', headers: body === undefined ? {} : { 'content-type': contentType, 'content-length': Buffer.byteLength(body) } }, res => {

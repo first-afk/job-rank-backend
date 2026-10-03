@@ -469,6 +469,7 @@ test('workspace read restores every accepted owner row across a configurable Pos
   }));
   const requests: string[] = [];
   globalThis.fetch = (async (input: any) => {
+    /** Enforce a smaller REST cap than requested to prove the reader follows all pages. */
     const url = new URL(String(input));
     assert.equal(url.hostname, 'synthetic.invalid');
     if (url.pathname === '/rest/v1/job_rankings') return new Response('[]', { status: 200, headers: { 'content-type': 'application/json', 'content-range': '*/0' } });
@@ -518,4 +519,32 @@ test('progress-write failure waits for already running job work before publishin
   assert.equal(atReturn.slowDone, true,
     `processRankingRun returned terminal status ${atReturn.status} with ${atReturn.pending} job(s) still running`);
   assert.equal(atReturn.pending, 0);
+});
+
+
+test('snapshot publication failure preserves the last valid cloud recovery pointer', async () => {
+  /** Force one confirmed database rejection after provider success and preserve the older result. */
+  const db = rankingDatabase();
+  globalThis.fetch = (async (_: any, init: any) => jsonResponse(jevResponse(JSON.parse(init.body)))) as any;
+  const first = await createRankingRun('owner-a', ['job-1']);
+  await processRankingRun(first.run.id, 'owner-a', first.jobIds);
+  const earlier = structuredClone(db.rows.job_rankings[0]);
+  const second = await createRankingRun('owner-a', ['job-1']);
+  let failedOnce = false;
+  db.hooks.before = async query => {
+    if (!failedOnce && query.table === 'ranking_run_jobs' && query.values?.status === 'rated'
+      && query.filters.some(([key, value]) => key === 'ranking_run_id' && value === second.run.id)) {
+      failedOnce = true;
+      return { data: null, error: new Error('Synthetic confirmed snapshot rejection') };
+    }
+  };
+  console.error = () => {};
+  await processRankingRun(second.run.id, 'owner-a', second.jobIds);
+  assert.equal(failedOnce, true);
+  assert.equal(db.rows.ranking_runs[1].status, 'failed');
+  assert.deepEqual(db.rows.job_rankings[0], earlier);
+  const output = response();
+  await getWorkspace(request(), output);
+  assert.equal(output.body.data[0].ranking_results.length, 1);
+  assert.equal(output.body.data[0].ranking_results[0].rated_at, db.rows.ranking_run_jobs[0].result_snapshot.rated_at);
 });

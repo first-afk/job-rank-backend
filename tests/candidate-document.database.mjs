@@ -25,6 +25,7 @@ test("atomic document replacement and server-only execution", async () => {
   }
   const uid = (n) => "00000000-0000-0000-0000-" + String(n).padStart(12, "0");
   const did = (n) => "10000000-0000-0000-0000-" + String(n).padStart(12, "0");
+  /** Replace synthetic document IDs through the real transactional database function. */
   const call = (
     client,
     id,

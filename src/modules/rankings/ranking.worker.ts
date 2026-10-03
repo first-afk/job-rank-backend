@@ -250,6 +250,17 @@ async function rankOneJob(
 
     const locationMismatch = (result.analysis as Record<string, unknown>)["location_mismatch"];
 
+    // Save the complete run result before replacing the last valid recovery pointer.
+    const { error: resultError } = await supabaseAdmin.from("ranking_run_jobs")
+      .update({ status: "rated", completed_at: new Date().toISOString(), result_snapshot: {
+        candidate_profile_id: context.candidateProfileId,
+        job_input_identity: createHash("sha256").update(JSON.stringify({ description: job.description })).digest("hex"),
+        job_id: job.id, analysis: result.analysis, prescriptive_score: score, ranking_version: rankingVersion,
+        status: "rated", model: context.model, resolved_model: typed?.model ?? context.model, classifier: context.classifier,
+        rated_at: new Date().toISOString(), verified_location: verifiedLocation ?? null, location_mismatch: locationMismatch ?? false,
+      } }).eq("ranking_run_id", context.runId).eq("job_id", job.id);
+    if (resultError) throw resultError;
+
     const { error: saveError } = await supabaseAdmin
       .from("job_rankings")
       .upsert(
@@ -279,15 +290,6 @@ async function rankOneJob(
 
     if (saveError) throw saveError;
 
-    const { error: resultError } = await supabaseAdmin.from("ranking_run_jobs")
-      .update({ status: "rated", completed_at: new Date().toISOString(), result_snapshot: {
-        candidate_profile_id: context.candidateProfileId,
-        job_input_identity: createHash("sha256").update(JSON.stringify({ description: job.description })).digest("hex"),
-        job_id: job.id, analysis: result.analysis, prescriptive_score: score, ranking_version: rankingVersion,
-        status: "rated", model: context.model, resolved_model: typed?.model ?? context.model, classifier: context.classifier,
-        rated_at: new Date().toISOString(), verified_location: verifiedLocation ?? null, location_mismatch: locationMismatch ?? false,
-      } }).eq("ranking_run_id", context.runId).eq("job_id", job.id);
-    if (resultError) throw resultError;
     if (context.classifier === "llm") await saveUsage({ context, result });
 
     return true;
