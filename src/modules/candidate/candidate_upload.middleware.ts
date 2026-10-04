@@ -1,4 +1,5 @@
 import multer from "multer";
+import { AppError } from "../../middleware/error-handling.js";
 
 const allowedTypes = [
   "application/pdf",
@@ -13,7 +14,13 @@ export const candidateDocumentUpload = multer({
   },
   fileFilter: (_request, file, callback) => {
     if (!allowedTypes.includes(file.mimetype)) {
-      callback(new Error("Only PDF, DOCX and TXT files are supported."));
+      callback(
+        new AppError(
+          400,
+          "UNSUPPORTED_DOCUMENT_TYPE",
+          "Only PDF, DOCX and TXT files are supported.",
+        ),
+      );
       return;
     }
 
