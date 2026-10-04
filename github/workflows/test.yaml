@@ -1,0 +1,16 @@
+name: Test project
+
+on:
+pull_request:
+branches:
+  - main
+
+jobs:
+test:
+runs-on: ubuntu-latest
+conatiner:
+image: node:20
+steps:
+  - uses: action/checkout@v3;
+    with:
+    node-version: 20
