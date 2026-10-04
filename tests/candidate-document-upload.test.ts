@@ -52,6 +52,7 @@ test("document publication and storage compensation", async (t) => {
           "Controller must not update document rows outside the RPC",
         );
       }) as any;
+      /** Model storage cleanup failures while preserving files for uncertain database outcomes. */
       supabaseAdmin.storage.from = (() => ({
         upload: async () => {
           if (scenario === "storage_error") return { error: { code: "503" } };

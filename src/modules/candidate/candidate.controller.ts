@@ -100,6 +100,7 @@ export async function uploadCandidateDocument(
       data: document,
     });
   } catch (error) {
+    // Clean up only after confirmed rollback; preserve files when the commit outcome is uncertain.
     let storageAction = "preserved; confirm upload/database outcome before cleanup";
     if (databaseRejected && storagePath) {
       try {

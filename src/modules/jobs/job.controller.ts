@@ -22,7 +22,12 @@ export async function searchJobs(request: Request, response: Response) {
   console.log("JobsDB provider results:", {
     count: providerJobs.length,
   });
-  const jobs = await saveSearchResults(request.auth!.userId, providerJobs, parsed.data.sourceSite);
+  const jobs = await saveSearchResults(
+    request.auth!.userId,
+    providerJobs,
+    parsed.data.sourceSite,
+    parsed.data.persistResults,
+  );
   await saveSearch(request.auth!.userId, parsed.data);
 
   console.log("Saved normalized jobs:", {

@@ -35,6 +35,7 @@ reset role;
 
 set role authenticated;
 set test.owner='alice';
+-- Prove restrictive candidate-write rules preserve owner reads and other-bucket writes.
 do $$ begin
   if (select array_agg(id order by id) from storage.objects) is distinct from array[1,2]
     then raise exception 'Own reads or cross-user isolation changed'; end if;

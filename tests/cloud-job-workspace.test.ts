@@ -70,7 +70,7 @@ afterEach(() => {
   process.env.JOBRANK_CLASSIFIER = 'jev';
 });
 
-type Query = { table: string; action: string; values?: any; options?: any; fields?: string; filters: Array<[string, any]>; ordering?: [string, boolean]; limit?: number; offset?: number; single?: boolean };
+type Query = { table: string; action: string; values?: any; options?: any; fields?: string; filters: Array<[string, any]>; ordering?: Array<[string, boolean]>; greaterThan?: Array<[string, string]>; afterRunJob?: [string, string]; limit?: number; offset?: number; single?: boolean };
 /** Record each real query, apply only the basic table operation, and allow deterministic write delays. */
 function database(initial: Record<string, any[]> = {}) {
   const rows = structuredClone(initial);
@@ -84,7 +84,13 @@ function database(initial: Record<string, any[]> = {}) {
     const early = await hooks.before?.(query);
     if (early) return early;
     const table = rows[query.table] ??= [];
-    const matches = (row: any) => query.filters.every(([key, value]) => Array.isArray(value) ? value.includes(row[key]) : row[key] === value);
+    const valueAt = (row: any, key: string) => key === 'ranking_runs.user_id'
+      ? rows.ranking_runs?.find(run => run.id === row.ranking_run_id)?.user_id
+      : key.startsWith('result_snapshot->>') ? row.result_snapshot?.[key.slice('result_snapshot->>'.length)] : row[key];
+    const matches = (row: any) => query.filters.every(([key, value]) => Array.isArray(value) ? value.includes(valueAt(row, key)) : valueAt(row, key) === value)
+      && (query.greaterThan ?? []).every(([key, value]) => row[key] > value)
+      && (!query.afterRunJob || row.ranking_run_id > query.afterRunJob[0]
+        || (row.ranking_run_id === query.afterRunJob[0] && row.job_id > query.afterRunJob[1]));
     let selected = table.filter(matches);
     if (query.action === 'update') selected.forEach(row => Object.assign(row, structuredClone(query.values)));
     if (query.action === 'delete') rows[query.table] = table.filter(row => !matches(row));
@@ -100,8 +106,13 @@ function database(initial: Record<string, any[]> = {}) {
       });
     }
     if (query.ordering) {
-      const [key, ascending] = query.ordering;
-      selected = [...selected].sort((a, b) => String(a[key]).localeCompare(String(b[key])) * (ascending ? 1 : -1));
+      selected = [...selected].sort((a, b) => {
+        for (const [key, ascending] of query.ordering!) {
+          const comparison = String(a[key]).localeCompare(String(b[key])) * (ascending ? 1 : -1);
+          if (comparison) return comparison;
+        }
+        return 0;
+      });
     }
     const count = selected.length;
     if (query.offset !== undefined) selected = selected.slice(query.offset);
@@ -119,7 +130,14 @@ function database(initial: Record<string, any[]> = {}) {
       select(fields = '*') { query.fields = fields; return builder; },
       eq(key: string, value: any) { query.filters.push([key, value]); return builder; },
       in(key: string, value: any[]) { query.filters.push([key, value]); return builder; },
-      order(key: string, options: any = { ascending: true }) { query.ordering = [key, options.ascending]; return builder; },
+      order(key: string, options: any = { ascending: true }) { (query.ordering ??= []).push([key, options.ascending]); return builder; },
+      gt(key: string, value: string) { (query.greaterThan ??= []).push([key, value]); return builder; },
+      or(expression: string) {
+        const match = /^ranking_run_id\.gt\.([^,]+),and\(ranking_run_id\.eq\.\1,job_id\.gt\.([^,)]+)\)$/.exec(expression);
+        assert.ok(match, `Unexpected composite cursor: ${expression}`);
+        query.afterRunJob = [match[1], match[2]];
+        return builder;
+      },
       range(from: number, to: number) { query.offset = from; query.limit = to - from + 1; return builder; },
       limit(value: number) { query.limit = value; return builder; },
       single() { query.single = true; return builder; }, maybeSingle() { query.single = true; return builder; },
@@ -400,6 +418,7 @@ test('workspace and saved-search boundaries always use the authenticated owner a
   await saveWorkspace(request({ user_id: 'owner-b', sourceSite: 'jobsdb', replace: false, jobs: [job] }), response());
   assert.equal(db.rpcCalls[0].args.p_user_id, 'owner-a');
   assert.equal(db.rpcCalls[0].args.p_replace, false);
+  assert.equal(db.rpcCalls[0].args.p_refresh_provider_content, false);
   assert.equal(db.rpcCalls[0].args.p_jobs[0].databaseStatus, 'offer_received', 'Server derives enum from validated public status');
   const mismatch = response(); await saveWorkspace(request({ sourceSite: 'linkedin', jobs: [job] }), mismatch);
   assert.equal(mismatch.statusCode, 400);
@@ -461,33 +480,41 @@ test('workspace reload reads the server result without a browser score write and
   assert.deepEqual(other.body.data, []);
 });
 
-test('workspace read restores every accepted owner row across a configurable PostgREST page cap', async () => {
-  /** Prove workspace read restores every accepted owner row across a configurable PostgREST page cap. Synthetic transport keeps this contract independent of live accounts. */
-  // The cap is an explicit deployment fixture, not a claim about the live project setting.
+test('workspace keyset paging keeps every surviving row when an earlier row is deleted under a REST cap', async () => {
+  /** Exercise the real SDK with exact remaining counts, a smaller REST cap, and a concurrent deletion. */
   const allRows = Array.from({ length: 1001 }, (_, i) => ({
-    job_id: `job-${i}`, workspace_data: { id: `external-${i}` }, jobs: { source: 'jobicy' },
+    job_id: `job-${String(i).padStart(4, '0')}`, workspace_data: { id: `external-${i}` }, jobs: { source: 'jobicy' },
   }));
+  const surviving = [...allRows];
   const requests: string[] = [];
+  /** Model PostgREST's cap and remaining-row counts, deleting a prior-page row on request two. */
   globalThis.fetch = (async (input: any) => {
-    /** Enforce a smaller REST cap than requested to prove the reader follows all pages. */
     const url = new URL(String(input));
     assert.equal(url.hostname, 'synthetic.invalid');
-    if (url.pathname === '/rest/v1/job_rankings') return new Response('[]', { status: 200, headers: { 'content-type': 'application/json', 'content-range': '*/0' } });
+    if (url.pathname === '/rest/v1/ranking_run_jobs') {
+      assert.equal(url.searchParams.get('ranking_runs.user_id'), 'eq.owner-a');
+      assert.match(url.searchParams.get('select')!, /ranking_runs!inner\(user_id\)/);
+      return new Response('[]', { status: 200, headers: { 'content-type': 'application/json', 'content-range': '*/0' } });
+    }
     assert.equal(url.pathname, '/rest/v1/user_jobs');
     assert.equal(url.searchParams.get('user_id'), 'eq.owner-a');
+    assert.equal(url.searchParams.get('order'), 'job_id.asc');
+    assert.equal(url.searchParams.has('offset'), false);
+    if (requests.length === 1) surviving.shift();
     requests.push(url.search);
-    const offset = Number(url.searchParams.get('offset') ?? 0);
-    const limit = Math.min(100, Number(url.searchParams.get('limit') ?? 1000));
-    const page = allRows.slice(offset, offset + limit);
+    const after = url.searchParams.get('job_id')?.replace(/^gt\./, '');
+    const remaining = surviving.filter(row => !after || row.job_id > after);
+    const page = remaining.slice(0, Math.min(100, Number(url.searchParams.get('limit'))));
     return new Response(JSON.stringify(page), { status: 200, headers: {
-      'content-type': 'application/json',
-      'content-range': `${offset}-${offset + page.length - 1}/${allRows.length}`,
+      'content-type': 'application/json', 'content-range': `0-${page.length - 1}/${remaining.length}`,
     }});
   }) as any;
   const output = response();
   await getWorkspace(request(), output);
-  assert.equal(output.body.data.length, allRows.length,
-    `A complete snapshot is required before destructive replacement; ${requests.length} REST request(s) returned ${output.body.data.length} of ${allRows.length} rows`);
+  const returned = new Set(output.body.data.map((row: any) => row.job_id));
+  assert.equal(returned.size, allRows.length);
+  assert.ok(surviving.every(row => returned.has(row.job_id)), 'Deletion before the cursor must not skip a surviving association');
+  assert.equal(requests.length, 11);
 });
 
 test('progress-write failure waits for already running job work before publishing a terminal run', async () => {
@@ -522,7 +549,7 @@ test('progress-write failure waits for already running job work before publishin
 });
 
 
-test('snapshot publication failure preserves the last valid cloud recovery pointer', async () => {
+test('snapshot publication failure preserves the previous valid cache and workspace result', async () => {
   /** Force one confirmed database rejection after provider success and preserve the older result. */
   const db = rankingDatabase();
   globalThis.fetch = (async (_: any, init: any) => jsonResponse(jevResponse(JSON.parse(init.body)))) as any;
@@ -547,4 +574,89 @@ test('snapshot publication failure preserves the last valid cloud recovery point
   await getWorkspace(request(), output);
   assert.equal(output.body.data[0].ranking_results.length, 1);
   assert.equal(output.body.data[0].ranking_results[0].rated_at, db.rows.ranking_run_jobs[0].result_snapshot.rated_at);
+});
+
+test('planner probes refresh shared provider content and history without saving account results', async () => {
+  /** An abandoned probe may refresh public content and query history, but must not save an account job. */
+  const db = database({ jobs: [{ id: 'canonical', source: 'jobsdb', external_id: 'external-1', title: 'Old title' }] });
+  globalThis.fetch = (async () => jsonResponse({ jobs: [{ id: 'external-1', title: 'New title' }] })) as any;
+  await searchJobs(request({ query: 'probe', persistResults: false }), response());
+  assert.equal(db.rows.jobs[0].title, 'New title');
+  assert.equal(db.rows.saved_searches[0].query, 'probe');
+  assert.equal(db.rows.user_jobs?.length ?? 0, 0);
+  assert.ok(!db.calls.some(query => query.table === 'user_jobs'));
+  // Omitting the new flag preserves the existing API contract for ordinary callers.
+  await searchJobs(request({ query: 'accepted' }), response());
+  assert.equal(db.rows.user_jobs.length, 1);
+  assert.equal(db.rows.user_jobs[0].user_id, 'owner-a');
+});
+
+test('workspace validates known client fields and requires explicit import-only provider refresh', async () => {
+  /** Reject values the client cannot deserialize, and keep shared refresh separate from replacement. */
+  const db = database();
+  const job = { id: 'external-1', source: 'jobicy', title: 'Title', companyName: 'Co', location: '', description: '', url: '', applicationStatus: 'Applied' };
+  for (const extras of [{ skills: [42] }, { prescriptiveScore: '0.5' }, { apiJobData: [] }, { summaryJson: 'bad' }, { generatedFuqAnswers: {} }, { locationMismatch: 'false' }, { interviewsNeeded: 2 }]) {
+    await assert.rejects(() => saveWorkspace(request({ sourceSite: 'configured', jobs: [{ ...job, ...extras }] }), response()));
+  }
+  await assert.rejects(() => saveWorkspace(request({ sourceSite: 'configured', refreshProviderContent: true, jobs: [job] }), response()), /requires an import/);
+  assert.equal(db.rpcCalls.length, 0);
+  await saveWorkspace(request({ sourceSite: 'configured', replace: false, refreshProviderContent: true, jobs: [{ ...job, skills: ['TypeScript'], prescriptiveScore: 0.5, apiJobData: null, summaryJson: {}, generatedFuqAnswers: null, locationMismatch: false, interviewsNeeded: 'Two', futureOptionalField: 'kept' }] }), response());
+  assert.equal(db.rpcCalls[0].args.p_refresh_provider_content, true);
+  assert.equal(db.rpcCalls[0].args.p_replace, false);
+  assert.equal(db.rpcCalls[0].args.p_jobs[0].futureOptionalField, 'kept');
+});
+
+test('confirmed rated snapshots survive cache rejection, lost cache response, and usage transport failure', async () => {
+  /** Once the authoritative snapshot succeeds, auxiliary failures must not hide or demote it. */
+  for (const failure of ['cache-rejected', 'cache-committed-response-lost', 'usage-response-lost']) {
+    const db = rankingDatabase();
+    process.env.JOBRANK_CLASSIFIER = failure.startsWith('usage') ? 'llm' : 'jev';
+    globalThis.fetch = (async (_: any, init: any) => {
+      const body = JSON.parse(init.body);
+      return jsonResponse(body.questions ? jevResponse(body) : { choices: [{ message: { content: JSON.stringify(analysis()) } }], usage: {} });
+    }) as any;
+    const run = await createRankingRun('owner-a', ['job-1']);
+    let injected = false;
+    db.hooks.before = async query => {
+      if (!injected && query.table === (failure.startsWith('usage') ? 'generation_usage' : 'job_rankings') && query.action !== 'select') {
+        injected = true;
+        if (failure === 'cache-committed-response-lost') db.rows.job_rankings.push(structuredClone(query.values));
+        if (failure.endsWith('response-lost')) throw new Error('Synthetic transport response lost');
+        return { data: null, error: new Error('Synthetic confirmed cache rejection') };
+      }
+    };
+    console.error = () => {};
+    await processRankingRun(run.run.id, 'owner-a', run.jobIds);
+    assert.equal(injected, true, failure);
+    assert.equal(db.rows.ranking_runs[0].status, 'completed', failure);
+    assert.equal(db.rows.ranking_runs[0].succeeded_jobs, 1, failure);
+    assert.equal(db.rows.ranking_run_jobs[0].status, 'rated', failure);
+    const output = response();
+    await getWorkspace(request(), output);
+    assert.deepEqual(output.body.data[0].ranking_results, [db.rows.ranking_run_jobs[0].result_snapshot], failure);
+    assert.ok(!db.calls.some(query => query.table === 'job_rankings' && query.action === 'select'));
+  }
+});
+
+test('workspace pages owner-rated snapshots by composite key and orders newest results first', async () => {
+  /** Page historical results while excluding foreign owners, old versions, and failed runs. */
+  const db = rankingDatabase(['job-1', 'job-2']);
+  const { rankingVersion } = await import('../src/modules/rankings/ranking.configuration.js');
+  for (let i = 0; i < 201; i++) {
+    const id = `run-${String(i).padStart(3, '0')}`;
+    db.rows.ranking_runs.push({ id, user_id: 'owner-a' });
+    for (const job_id of ['job-1', 'job-2']) db.rows.ranking_run_jobs.push({ ranking_run_id: id, job_id, status: 'rated', completed_at: id, result_snapshot: { ranking_version: rankingVersion, marker: id } });
+  }
+  db.rows.ranking_runs.push({ id: 'foreign', user_id: 'owner-b' }, { id: 'failed', user_id: 'owner-a' }, { id: 'obsolete', user_id: 'owner-a' });
+  for (const [id, status, version] of [['foreign', 'rated', rankingVersion], ['failed', 'failed', rankingVersion], ['obsolete', 'rated', 'old-version']]) {
+    db.rows.ranking_run_jobs.push({ ranking_run_id: id, job_id: 'job-1', status, result_snapshot: { ranking_version: version, marker: id } });
+  }
+  const output = response();
+  await getWorkspace(request(), output);
+  for (const row of output.body.data) {
+    assert.equal(row.ranking_results.length, 201);
+    assert.equal(row.ranking_results[0].marker, 'run-200');
+    assert.equal(row.ranking_results.at(-1).marker, 'run-000');
+  }
+  assert.equal(db.calls.filter(query => query.table === 'ranking_run_jobs').length, 3);
 });

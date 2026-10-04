@@ -214,6 +214,7 @@ async function rankOneJob(
   job: DatabaseJob,
 ): Promise<boolean> {
   const attemptedAt = new Date().toISOString();
+  let resultSaved = false;
 
   const { error: processingError } = await supabaseAdmin.from("ranking_run_jobs")
     .update({ status: "processing", started_at: attemptedAt })
@@ -250,16 +251,29 @@ async function rankOneJob(
 
     const locationMismatch = (result.analysis as Record<string, unknown>)["location_mismatch"];
 
-    // Save the complete run result before replacing the last valid recovery pointer.
+    // Save the authoritative run result before updating the auxiliary latest-rating cache.
     const { error: resultError } = await supabaseAdmin.from("ranking_run_jobs")
-      .update({ status: "rated", completed_at: new Date().toISOString(), result_snapshot: {
-        candidate_profile_id: context.candidateProfileId,
-        job_input_identity: createHash("sha256").update(JSON.stringify({ description: job.description })).digest("hex"),
-        job_id: job.id, analysis: result.analysis, prescriptive_score: score, ranking_version: rankingVersion,
-        status: "rated", model: context.model, resolved_model: typed?.model ?? context.model, classifier: context.classifier,
-        rated_at: new Date().toISOString(), verified_location: verifiedLocation ?? null, location_mismatch: locationMismatch ?? false,
-      } }).eq("ranking_run_id", context.runId).eq("job_id", job.id);
+      .update({
+        status: "rated",
+        completed_at: new Date().toISOString(),
+        result_snapshot: {
+          candidate_profile_id: context.candidateProfileId,
+          job_input_identity: createHash("sha256").update(JSON.stringify({ description: job.description })).digest("hex"),
+          job_id: job.id,
+          analysis: result.analysis,
+          prescriptive_score: score,
+          ranking_version: rankingVersion,
+          status: "rated",
+          model: context.model,
+          resolved_model: typed?.model ?? context.model,
+          classifier: context.classifier,
+          rated_at: new Date().toISOString(),
+          verified_location: verifiedLocation ?? null,
+          location_mismatch: locationMismatch ?? false,
+        },
+      }).eq("ranking_run_id", context.runId).eq("job_id", job.id);
     if (resultError) throw resultError;
+    resultSaved = true;
 
     const { error: saveError } = await supabaseAdmin
       .from("job_rankings")
@@ -294,6 +308,14 @@ async function rankOneJob(
 
     return true;
   } catch (error) {
+    // A complete result remains authoritative even when an auxiliary write loses its response.
+    if (resultSaved) {
+      console.error("Could not save auxiliary ranking data:", {
+        runId: context.runId,
+        jobId: job.id,
+      });
+      return true;
+    }
     const publicMessage =
       error instanceof Error ? error.message : "Ranking failed.";
 

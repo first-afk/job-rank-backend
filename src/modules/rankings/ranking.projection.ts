@@ -48,6 +48,7 @@ export async function rankWithJev(input: { description: string; cv: string; prof
   const questions: Record<string, any> = {};
   const paths: string[][] = [];
   const criteria = ["Not related to this job.", "Tangentially related to this job.", "Strongly related to this job.", "A specific, direct match for this job."];
+  /** Give each exact candidate leaf a stable question ID so answers map back to its score path. */
   function walk(shape: any, path: string[]) {
     if (shape !== true) {
       for (const key of Object.keys(shape)) walk(shape[key], [...path, key]);

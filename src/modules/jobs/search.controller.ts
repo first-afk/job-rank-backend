@@ -2,10 +2,15 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { supabaseAdmin } from "../../config/supabase.js";
 
-const historySchema = z.object({ searches: z.array(z.object({
-  query: z.string().trim().min(1).max(200), locationMode: z.enum(["remote", "on-site", "all"]),
-  countryScope: z.string().max(100), hasSalary: z.boolean(), city: z.string().max(100).nullable(),
-})).max(40) });
+const historySchema = z.object({
+  searches: z.array(z.object({
+    query: z.string().trim().min(1).max(200),
+    locationMode: z.enum(["remote", "on-site", "all"]),
+    countryScope: z.string().max(100),
+    hasSalary: z.boolean(),
+    city: z.string().max(100).nullable(),
+  })).max(40),
+});
 
 /** Only the token owner may read or replace this account's saved queries. */
 export async function getSearchHistory(request: Request, response: Response) {

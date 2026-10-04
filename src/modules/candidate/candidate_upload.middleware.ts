@@ -12,6 +12,7 @@ export const candidateDocumentUpload = multer({
   limits: {
     fileSize: 10 * 1024 * 1024,
   },
+  /** Reject unsupported uploads before parsing or publishing candidate evidence. */
   fileFilter: (_request, file, callback) => {
     if (!allowedTypes.includes(file.mimetype)) {
       callback(

@@ -58,6 +58,7 @@ export async function saveSearchResults(
   userId: string | undefined,
   providerJobs: Record<string, unknown>[],
   source = "jobsdb",
+  persistResults = true,
 ) {
   // A provider can repeat a posting within a page. PostgreSQL cannot upsert
   // the same conflict key twice in one statement.
@@ -76,6 +77,9 @@ export async function saveSearchResults(
     .select();
 
   if (error) throw error;
+
+  // Planner probes refresh the provider cache without admitting jobs to an account.
+  if (!persistResults) return jobs;
 
   const userJobs = jobs.map((job) => ({
     user_id: userId,
