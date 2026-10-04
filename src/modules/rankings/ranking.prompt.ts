@@ -1,3 +1,4 @@
+import { scoreProjection } from "./ranking.projection.js";
 export function buildRankingPrompt(input: {
   jobDescription: string;
   cvContent: string;
@@ -74,6 +75,6 @@ IMPORTANT: Your response MUST be valid JSON and contain ONLY the JSON. Do NOT in
     ]
   }
 }
-Ensure all keys in the example structure are present in your output. For fields that were originally arrays (like 'areas_of_interest' or 'adaptability' in the provided schema/skills JSON), ensure they are converted to **JSON objects with scored items** in the output of the 'candidate_match' section. """
+The example is illustrative. The candidate_match score roots MUST instead match these exact keys and nesting, replacing every true leaf with one numeric score from 0 to 1: ${JSON.stringify(scoreProjection(input.skillsProfile))}. Never add skills or branches absent from that projection. For fields that were originally arrays (like 'areas_of_interest' or 'adaptability' in the provided schema/skills JSON), ensure they are converted to **JSON objects with scored items** in the output of the 'candidate_match' section. """
 `;
 }

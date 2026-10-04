@@ -1,8 +1,10 @@
 import { z } from "zod";
 
 export const jobSearchSchema = z.object({
-  query: z.string().trim().min(1).max(200),
-  sourceSite: z.enum(["jobsdb"]).default("jobsdb"),
+  query: z.string().trim().max(200),
+  historyQuery: z.string().trim().max(200).optional(),
+  sourceSite: z.enum(["jobsdb", "linkedin"]).default("jobsdb"),
+  persistResults: z.boolean().default(true),
   isRemote: z.boolean().default(false),
   countryCodes: z.array(z.string().length(2)).max(20).default([]),
   city: z.string().trim().max(100).nullable().optional(),

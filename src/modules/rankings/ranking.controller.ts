@@ -1,16 +1,17 @@
 import type { Request, Response } from "express";
+import { z } from "zod";
 import { createRankingRun } from "./ranking.service.js";
 import { processRankingRun } from "./ranking.worker.js";
 import { supabaseAdmin } from "../../config/supabase.js";
 
 export async function startRankingRun(request: Request, response: Response) {
-  const jobIds = request.body.jobIds;
+  const jobIds = request.body?.jobIds;
 
   if (
     !Array.isArray(jobIds) ||
     jobIds.length === 0 ||
     jobIds.length > 100 ||
-    !jobIds.every((id) => typeof id === "string")
+    !jobIds.every((id) => z.string().uuid().safeParse(id).success)
   ) {
     return response.status(400).json({
       error: {
@@ -40,7 +41,8 @@ export async function getRankingRun(request: Request, response: Response) {
       id,
       status,
       total_jobs,
-      completed_jobs,
+      processed_jobs,
+      succeeded_jobs,
       failed_jobs,
       error_message,
       created_at,
@@ -70,28 +72,12 @@ export async function getRankingRunResults(
   request: Request,
   response: Response,
 ) {
-  const { data, error } = await supabaseAdmin
-    .from("job_rankings")
-    .select(
-      `
-      id,
-      job_id,
-      prescriptive_score,
-      analysis,
-      verified_location,
-      location_mismatch,
-      status,
-      ranking_version,
-      processing_error,
-      rated_at
-    `,
-    )
-    .eq("run_id", request.params.runId)
-    .eq("user_id", request.auth?.userId);
-
+  const { data: run, error: runError } = await supabaseAdmin.from("ranking_runs")
+    .select("id").eq("id", request.params.runId).eq("user_id", request.auth!.userId).maybeSingle();
+  if (runError) throw runError;
+  if (!run) return response.status(404).json({ error: { code: "RANKING_RUN_NOT_FOUND", message: "Ranking run was not found." } });
+  const { data, error } = await supabaseAdmin.from("ranking_run_jobs")
+    .select("result_snapshot").eq("ranking_run_id", run.id);
   if (error) throw error;
-
-  return response.status(200).json({
-    data: data ?? [],
-  });
+  return response.json({ data: (data ?? []).map(item => item.result_snapshot).filter(Boolean) });
 }

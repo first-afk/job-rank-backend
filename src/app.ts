@@ -1,4 +1,4 @@
-import express, { ErrorRequestHandler } from "express";
+import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 
@@ -20,12 +20,10 @@ app.use(helmet());
 app.use(
   cors({
     origin: env.FRONTEND_URL,
-    methods: ["GET", "POST", "PATCH", "DELETE"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
-
-app.use(express.json({ limit: "1mb" }));
 
 app.use(
   pinoHttp({
@@ -38,6 +36,10 @@ app.use(
     ],
   }),
 );
+
+// Provider-rich job snapshots need a larger body than ordinary account requests.
+app.use("/v1/jobs/workspace", express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "1mb" }));
 
 app.get("/", (_request, response) => {
   response.status(200).json({
@@ -69,31 +71,4 @@ app.use((request, response) => {
   });
 });
 
-const globalErrorHandler: ErrorRequestHandler = (
-  error,
-  _request,
-  response,
-  _next,
-) => {
-  console.error(
-    "Unhandled backend error:",
-    error instanceof Error
-      ? {
-          name: error.name,
-          message: error.message,
-          stack: error.stack,
-        }
-      : error,
-  );
-
-  response.status(500).json({
-    error: {
-      code: "INTERNAL_SERVER_ERROR",
-      message:
-        error instanceof Error
-          ? error.message
-          : "An unexpected error occurred.",
-    },
-  });
-};
-app.use(globalErrorHandler);
+app.use(errorHandler);
