@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authenticate } from "../../middleware/authenticate.js";
 import { requireActiveAccount } from "../../middleware/require-active-account.js";
 import {
+  deactivateCandidateDocument,
   listCandidateDocuments,
   uploadCandidateDocument,
 } from "./candidate.controller.js";
@@ -33,6 +34,13 @@ candidateRouter.get(
   authenticate,
   requireActiveAccount,
   listCandidateDocuments,
+);
+
+candidateRouter.delete(
+  "/documents/:id",
+  authenticate,
+  requireActiveAccount,
+  deactivateCandidateDocument,
 );
 
 candidateRouter.get(
