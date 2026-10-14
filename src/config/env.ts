@@ -19,6 +19,17 @@ const environmentSchema = z.object({
   OPENROUTER_API_KEY: z.string().min(1),
 
   JOBSDB_API_KEY: z.string().min(1),
+
+  TYPESAFE_API_KEY: z.string().min(1),
+
+  SKILLS_JSON_GENERATION_MODEL: z.string().min(1),
+
+  COVER_LETTER_CODEX_MODEL: z.string().min(1),
+
+  QUESTION_ANSWERING_CODEX_MODEL: z
+    .string()
+    .min(1)
+    .default("openai/gpt-5.6-luna"),
 });
 
 const result = environmentSchema.safeParse(process.env);

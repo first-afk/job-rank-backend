@@ -5,6 +5,7 @@ import { searchJobs } from "./job.controller.js";
 
 import { getWorkspace, saveWorkspace } from "./workspace.controller.js";
 import { createCoverLetter } from "../cover-letter/cover-letter.controller.js";
+import { createFollowUpAnswers } from "../follow-up-answers/follow-up.controller.js";
 
 export const jobRouter = Router();
 
@@ -18,4 +19,11 @@ jobRouter.post(
   authenticate,
   requireActiveAccount,
   createCoverLetter,
+);
+
+jobRouter.post(
+  "/:jobId/follow-up-answers",
+  authenticate,
+  requireActiveAccount,
+  createFollowUpAnswers,
 );
